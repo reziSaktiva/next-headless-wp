@@ -1,5 +1,5 @@
 import { wp } from "@/lib/wordpress";
-import PostContent from "@/components/PostContent";
+import PostContent from "@/pages/post-content";
 import PostsPage from "./posts";
 import NotFound from "@/app/not-found";
 

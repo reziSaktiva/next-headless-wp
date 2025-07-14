@@ -120,6 +120,38 @@ export interface WPPost {
   _links: any;
   categories: number[];
   tags: number[];
+  yoast_head_json?: {
+    title?: string;
+    description?: string;
+    robots?: {
+      index?: string;
+      follow?: string;
+      "max-snippet"?: string;
+      "max-image-preview"?: string;
+      "max-video-preview"?: string;
+    };
+    canonical?: string;
+    og_locale?: string;
+    og_type?: string;
+    og_title?: string;
+    og_description?: string;
+    og_url?: string;
+    og_site_name?: string;
+    article_published_time?: string;
+    og_image?: Array<{
+      url?: string;
+      width?: number;
+      height?: number;
+      type?: string;
+    }>;
+    author?: string;
+    twitter_card?: string;
+    twitter_misc?: {
+      "Written by"?: string;
+      "Est. reading time"?: string;
+    };
+    schema?: any;
+  };
 }
 
 export interface WPPage {
@@ -155,6 +187,38 @@ export interface WPPage {
   template: string;
   meta: any[];
   _links: any;
+  yoast_head_json?: {
+    title?: string;
+    description?: string;
+    robots?: {
+      index?: string;
+      follow?: string;
+      "max-snippet"?: string;
+      "max-image-preview"?: string;
+      "max-video-preview"?: string;
+    };
+    canonical?: string;
+    og_locale?: string;
+    og_type?: string;
+    og_title?: string;
+    og_description?: string;
+    og_url?: string;
+    og_site_name?: string;
+    article_published_time?: string;
+    og_image?: Array<{
+      url?: string;
+      width?: number;
+      height?: number;
+      type?: string;
+    }>;
+    author?: string;
+    twitter_card?: string;
+    twitter_misc?: {
+      "Written by"?: string;
+      "Est. reading time"?: string;
+    };
+    schema?: any;
+  };
 }
 
 export interface WPCategory {
@@ -219,6 +283,8 @@ export interface WPMedia {
   _links: any;
 }
 
+import { cache } from "react";
+
 // WordPress API functions
 export class WordPressAPI {
   private apiUrl: string;
@@ -228,65 +294,73 @@ export class WordPressAPI {
   }
 
   // Get all posts
-  async getPosts(params?: {
-    page?: number;
-    per_page?: number;
-    categories?: number[];
-    tags?: number[];
-    search?: string;
-    orderby?: string;
-    order?: "asc" | "desc";
-  }): Promise<{ posts: WPPost[]; totalPosts: number; totalPages: number }> {
-    try {
-      const posts = await wpFetch(WP_ENDPOINTS.posts, params);
-
-      // Get total count by making a request to get total posts
-      let totalPosts = 0;
+  getPosts = cache(
+    async (params?: {
+      page?: number;
+      per_page?: number;
+      categories?: number[];
+      tags?: number[];
+      search?: string;
+      orderby?: string;
+      order?: "asc" | "desc";
+    }): Promise<{
+      posts: WPPost[];
+      totalPosts: number;
+      totalPages: number;
+    }> => {
       try {
-        // Make a request with per_page=1 to get total count efficiently
-        const url = new URL(WP_ENDPOINTS.posts, WORDPRESS_CONFIG.siteUrl);
-        url.searchParams.set("per_page", "1");
+        const posts = await wpFetch(WP_ENDPOINTS.posts, params);
 
-        const response = await fetch(url.toString(), {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            "Content-Type": "application/json",
-          },
-          mode: "cors",
-        });
+        // Get total count by making a request to get total posts
+        let totalPosts = 0;
+        try {
+          // Make a request with per_page=1 to get total count efficiently
+          const url = new URL(WP_ENDPOINTS.posts, WORDPRESS_CONFIG.siteUrl);
+          url.searchParams.set("per_page", "1");
 
-        if (response.ok) {
-          const totalPostsHeader = response.headers.get("x-wp-total");
-          if (totalPostsHeader) {
-            totalPosts = parseInt(totalPostsHeader);
-            console.log("Total posts from header:", totalPosts);
-          } else {
-            // Fallback: get all posts to count
-            const allPosts = await wpFetch(WP_ENDPOINTS.posts, {
-              per_page: 100,
-            });
-            totalPosts = allPosts.length;
+          const response = await fetch(url.toString(), {
+            method: "GET",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            mode: "cors",
+          });
+
+          if (response.ok) {
+            const totalPostsHeader = response.headers.get("x-wp-total");
+            if (totalPostsHeader) {
+              totalPosts = parseInt(totalPostsHeader);
+              console.log("Total posts from header:", totalPosts);
+            } else {
+              // Fallback: get all posts to count
+              const allPosts = await wpFetch(WP_ENDPOINTS.posts, {
+                per_page: 100,
+              });
+              totalPosts = allPosts.length;
+            }
           }
+        } catch (error) {
+          console.warn("Could not get total posts count:", error);
+          // Fallback: estimate based on current page and posts per page
+          totalPosts =
+            posts.length > 0
+              ? (params?.page || 1) * (params?.per_page || 10)
+              : 0;
         }
+
+        const totalPages = Math.ceil(totalPosts / (params?.per_page || 10));
+
+        return { posts, totalPosts, totalPages };
       } catch (error) {
-        console.warn("Could not get total posts count:", error);
-        // Fallback: estimate based on current page and posts per page
-        totalPosts =
-          posts.length > 0 ? (params?.page || 1) * (params?.per_page || 10) : 0;
+        console.error("Error fetching posts:", error);
+        throw error;
       }
-
-      const totalPages = Math.ceil(totalPosts / (params?.per_page || 10));
-
-      return { posts, totalPosts, totalPages };
-    } catch (error) {
-      console.error("Error fetching posts:", error);
-      throw error;
     }
-  }
+  );
 
   // Get single post by slug
-  async getPostBySlug(slug: string): Promise<WPPost> {
+  getPostBySlug = cache(async (slug: string): Promise<WPPost> => {
     try {
       const posts = await wpFetch(WP_ENDPOINTS.posts, { slug });
       return posts[0];
@@ -294,26 +368,28 @@ export class WordPressAPI {
       console.error("Error fetching post:", error);
       throw error;
     }
-  }
+  });
 
   // Get all pages
-  async getPages(params?: {
-    page?: number;
-    per_page?: number;
-    parent?: number;
-    orderby?: string;
-    order?: "asc" | "desc";
-  }): Promise<WPPage[]> {
-    try {
-      return await wpFetch(WP_ENDPOINTS.pages, params);
-    } catch (error) {
-      console.error("Error fetching pages:", error);
-      throw error;
+  getPages = cache(
+    async (params?: {
+      page?: number;
+      per_page?: number;
+      parent?: number;
+      orderby?: string;
+      order?: "asc" | "desc";
+    }): Promise<WPPage[]> => {
+      try {
+        return await wpFetch(WP_ENDPOINTS.pages, params);
+      } catch (error) {
+        console.error("Error fetching pages:", error);
+        throw error;
+      }
     }
-  }
+  );
 
   // Get single page by slug
-  async getPageBySlug(slug: string): Promise<WPPage> {
+  getPageBySlug = cache(async (slug: string): Promise<WPPage> => {
     try {
       const pages = await wpFetch(WP_ENDPOINTS.pages, { slug });
       return pages[0];
@@ -321,154 +397,164 @@ export class WordPressAPI {
       console.error("Error fetching page:", error);
       throw error;
     }
-  }
+  });
 
   // Get categories
-  async getCategories(params?: {
-    page?: number;
-    per_page?: number;
-    orderby?: string;
-    order?: "asc" | "desc";
-  }): Promise<WPCategory[]> {
-    try {
-      return await wpFetch(WP_ENDPOINTS.categories, params);
-    } catch (error) {
-      console.error("Error fetching categories:", error);
-      throw error;
+  getCategories = cache(
+    async (params?: {
+      page?: number;
+      per_page?: number;
+      orderby?: string;
+      order?: "asc" | "desc";
+    }): Promise<WPCategory[]> => {
+      try {
+        return await wpFetch(WP_ENDPOINTS.categories, params);
+      } catch (error) {
+        console.error("Error fetching categories:", error);
+        throw error;
+      }
     }
-  }
+  );
 
   // Get media by ID
-  async getMedia(mediaId: number): Promise<WPMedia> {
+  getMedia = cache(async (mediaId: number): Promise<WPMedia> => {
     try {
       return await wpFetch(`${WP_ENDPOINTS.media}/${mediaId}`);
     } catch (error) {
       console.error("Error fetching media:", error);
       throw error;
     }
-  }
+  });
 
   // Get featured image URL
-  async getFeaturedImageUrl(
-    featuredMediaId: number,
-    size: string = "medium"
-  ): Promise<string> {
-    try {
-      const media = await this.getMedia(featuredMediaId);
-      return media.media_details.sizes[size]?.source_url || media.source_url;
-    } catch (error) {
-      console.error("Error fetching featured image:", error);
-      return "";
+  getFeaturedImageUrl = cache(
+    async (
+      featuredMediaId: number,
+      size: string = "medium"
+    ): Promise<string> => {
+      try {
+        const media = await this.getMedia(featuredMediaId);
+        return media.media_details.sizes[size]?.source_url || media.source_url;
+      } catch (error) {
+        console.error("Error fetching featured image:", error);
+        return "";
+      }
     }
-  }
+  );
 
   // Get WordPress settings
-  async getSettings(): Promise<{
-    show_on_front: string;
-    page_on_front?: number;
-    page_for_posts?: number;
-    title: string;
-    description: string;
-    posts_per_page: number;
-  }> {
-    try {
-      // Try to get settings from WordPress
-      const settings = await wpFetch(WP_ENDPOINTS.settings);
-      return settings;
-    } catch (error) {
-      console.error("Error fetching settings:", error);
-
-      // Fallback: try to get basic site info from posts
+  getSettings = cache(
+    async (): Promise<{
+      show_on_front: string;
+      page_on_front?: number;
+      page_for_posts?: number;
+      title: string;
+      description: string;
+      posts_per_page: number;
+    }> => {
       try {
-        const posts = await wpFetch(WP_ENDPOINTS.posts, { per_page: 1 });
-        if (posts.length > 0) {
-          // Try to extract site info from the first post
-          return {
-            show_on_front: "posts",
-            title: "WordPress Site",
-            description: "A WordPress powered site",
-            posts_per_page: 10,
-          };
-        }
-      } catch (fallbackError) {
-        console.error("Fallback also failed:", fallbackError);
-      }
+        // Try to get settings from WordPress
+        const settings = await wpFetch(WP_ENDPOINTS.settings);
+        return settings;
+      } catch (error) {
+        console.error("Error fetching settings:", error);
 
-      // Return default settings
-      return {
-        show_on_front: "posts",
-        title: "WordPress Site",
-        description: "A WordPress powered site",
-        posts_per_page: 10,
-      };
+        // Fallback: try to get basic site info from posts
+        try {
+          const posts = await wpFetch(WP_ENDPOINTS.posts, { per_page: 1 });
+          if (posts.length > 0) {
+            // Try to extract site info from the first post
+            return {
+              show_on_front: "posts",
+              title: "WordPress Site",
+              description: "A WordPress powered site",
+              posts_per_page: 10,
+            };
+          }
+        } catch (fallbackError) {
+          console.error("Fallback also failed:", fallbackError);
+        }
+
+        // Return default settings
+        return {
+          show_on_front: "posts",
+          title: "WordPress Site",
+          description: "A WordPress powered site",
+          posts_per_page: 10,
+        };
+      }
     }
-  }
+  );
 
   // Get page by ID
-  async getPageById(pageId: number): Promise<WPPage> {
+  getPageById = cache(async (pageId: number): Promise<WPPage> => {
     try {
       return await wpFetch(`${WP_ENDPOINTS.pages}/${pageId}`);
     } catch (error) {
       console.error("Error fetching page by ID:", error);
       throw error;
     }
-  }
+  });
 
   // Get site info from posts endpoint (fallback when settings not accessible)
-  async getSiteInfo(): Promise<{
-    title: string;
-    description: string;
-  }> {
-    try {
-      // Try to get site info from posts endpoint
-      const posts = await wpFetch(WP_ENDPOINTS.posts, { per_page: 1 });
-      if (posts.length > 0) {
-        // Extract site info from the first post's _links
-        const firstPost = posts[0];
-        return {
-          title: "WordPress Site",
-          description: "A WordPress powered site",
-        };
+  getSiteInfo = cache(
+    async (): Promise<{
+      title: string;
+      description: string;
+    }> => {
+      try {
+        // Try to get site info from posts endpoint
+        const posts = await wpFetch(WP_ENDPOINTS.posts, { per_page: 1 });
+        if (posts.length > 0) {
+          // Extract site info from the first post's _links
+          const firstPost = posts[0];
+          return {
+            title: "WordPress Site",
+            description: "A WordPress powered site",
+          };
+        }
+      } catch (error) {
+        console.error("Error fetching site info:", error);
       }
-    } catch (error) {
-      console.error("Error fetching site info:", error);
-    }
 
-    return {
-      title: "WordPress Site",
-      description: "A WordPress powered site",
-    };
-  }
-
-  // Get front settings (homepage/posts page info) from root endpoint (no auth required)
-  async getFrontSettings(): Promise<{
-    show_on_front: string;
-    page_on_front?: number;
-    page_for_posts?: number;
-    title: string;
-    description: string;
-  }> {
-    try {
-      const res = await fetch(`${WORDPRESS_CONFIG.siteUrl}/wp-json`);
-      const data = await res.json();
-      // Some WP setups put these in data.site, some in data directly
-      const site = data.site || data;
       return {
-        show_on_front: site.show_on_front || "posts",
-        page_on_front: site.page_on_front,
-        page_for_posts: site.page_for_posts,
-        title: site.name || "WordPress Site",
-        description: site.description || "A WordPress powered site",
-      };
-    } catch (error) {
-      console.error("Error fetching front settings:", error);
-      return {
-        show_on_front: "posts",
         title: "WordPress Site",
         description: "A WordPress powered site",
       };
     }
-  }
+  );
+
+  // Get front settings (homepage/posts page info) from root endpoint (no auth required)
+  getFrontSettings = cache(
+    async (): Promise<{
+      show_on_front: string;
+      page_on_front?: number;
+      page_for_posts?: number;
+      title: string;
+      description: string;
+    }> => {
+      try {
+        const res = await fetch(`${WORDPRESS_CONFIG.siteUrl}/wp-json`);
+        const data = await res.json();
+        // Some WP setups put these in data.site, some in data directly
+        const site = data.site || data;
+        return {
+          show_on_front: site.show_on_front || "posts",
+          page_on_front: site.page_on_front,
+          page_for_posts: site.page_for_posts,
+          title: site.name || "WordPress Site",
+          description: site.description || "A WordPress powered site",
+        };
+      } catch (error) {
+        console.error("Error fetching front settings:", error);
+        return {
+          show_on_front: "posts",
+          title: "WordPress Site",
+          description: "A WordPress powered site",
+        };
+      }
+    }
+  );
 }
 
 // Create default instance
