@@ -8,6 +8,10 @@ export const WORDPRESS_CONFIG = {
     "http://localhost:8000/wp-json/wp/v2/menus",
   acfUrl:
     process.env.WORDPRESS_ACF_URL || "http://localhost:8000/wp-json/acf/v3",
+  // Authentication
+  username: process.env.WORDPRESS_USERNAME,
+  password: process.env.WORDPRESS_PASSWORD,
+  applicationPassword: process.env.WORDPRESS_PASSWORD,
 };
 
 // Helper function for API calls
@@ -25,13 +29,29 @@ async function wpFetch(endpoint: string, params?: Record<string, any>) {
     });
   }
 
+  // Prepare headers
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+  };
+
+  // Add authentication header if credentials are provided
+  if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.applicationPassword) {
+    const credentials = Buffer.from(
+      `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.applicationPassword}`
+    ).toString("base64");
+    headers.Authorization = `Basic ${credentials}`;
+  } else if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.password) {
+    const credentials = Buffer.from(
+      `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.password}`
+    ).toString("base64");
+    headers.Authorization = `Basic ${credentials}`;
+  }
+
   try {
     const response = await fetch(url.toString(), {
       method: "GET",
-      headers: {
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
+      headers,
       mode: "cors",
     });
 
@@ -283,6 +303,36 @@ export interface WPMedia {
   _links: any;
 }
 
+export interface WPMenuItem {
+  id: number;
+  title: {
+    rendered: string;
+  };
+  url: string;
+  target: string;
+  classes: string[];
+  link_class: string[];
+  xfn: string[];
+  description: string;
+  attr_title: string;
+  object: string;
+  object_id: number;
+  parent: number;
+  menu_order: number;
+  type: string;
+  type_label: string;
+  _links: any;
+}
+
+export interface WPMenu {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  count: number;
+  items: WPMenuItem[];
+}
+
 import { cache } from "react";
 
 // WordPress API functions
@@ -291,6 +341,29 @@ export class WordPressAPI {
 
   constructor(apiUrl?: string) {
     this.apiUrl = apiUrl || WORDPRESS_CONFIG.apiUrl;
+  }
+
+  // Helper method to get authentication headers
+  private getAuthHeaders(): Record<string, string> {
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    };
+
+    // Add authentication header if credentials are provided
+    if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.applicationPassword) {
+      const credentials = Buffer.from(
+        `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.applicationPassword}`
+      ).toString("base64");
+      headers.Authorization = `Basic ${credentials}`;
+    } else if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.password) {
+      const credentials = Buffer.from(
+        `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.password}`
+      ).toString("base64");
+      headers.Authorization = `Basic ${credentials}`;
+    }
+
+    return headers;
   }
 
   // Get all posts
@@ -534,7 +607,28 @@ export class WordPressAPI {
       description: string;
     }> => {
       try {
-        const res = await fetch(`${WORDPRESS_CONFIG.siteUrl}/wp-json`);
+        // Prepare headers
+        const headers: Record<string, string> = {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        };
+
+        // Add authentication header if credentials are provided
+        if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.applicationPassword) {
+          const credentials = Buffer.from(
+            `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.applicationPassword}`
+          ).toString("base64");
+          headers.Authorization = `Basic ${credentials}`;
+        } else if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.password) {
+          const credentials = Buffer.from(
+            `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.password}`
+          ).toString("base64");
+          headers.Authorization = `Basic ${credentials}`;
+        }
+
+        const res = await fetch(`${WORDPRESS_CONFIG.siteUrl}/wp-json`, {
+          headers,
+        });
         const data = await res.json();
         // Some WP setups put these in data.site, some in data directly
         const site = data.site || data;
@@ -552,6 +646,275 @@ export class WordPressAPI {
           title: "WordPress Site",
           description: "A WordPress powered site",
         };
+      }
+    }
+  );
+
+  // Get menu items by menu location or menu ID
+  getMenuItems = cache(
+    async (params?: {
+      location?: string;
+      menu_id?: number;
+      menu_slug?: string;
+    }): Promise<WPMenuItem[]> => {
+      try {
+        // Method 1: Try to get menu by slug (NextWP approach)
+        if (params?.menu_slug) {
+          try {
+            const menusRes = await fetch(
+              `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/menus?slug=${params.menu_slug}`,
+              {
+                headers: this.getAuthHeaders(),
+              }
+            );
+
+            const menus = (await menusRes.json()) as any[];
+
+            if (menus && menus.length > 0) {
+              const menu = menus[0];
+              console.log(
+                `Found menu with ID ${menu.id} for slug ${params.menu_slug}`
+              );
+
+              // Get menu items by menu id
+              const menuItemsRes = await fetch(
+                `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/menu-items?menus=${menu.id}&acf_format=standard`,
+                {
+                  headers: this.getAuthHeaders(),
+                }
+              );
+
+              if (menuItemsRes.ok) {
+                const menuItems = (await menuItemsRes.json()) as WPMenuItem[];
+                return menuItems;
+              }
+            } else {
+              // List available menus for debugging
+              const availableMenusRes = await fetch(
+                `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/menus`,
+                {
+                  headers: this.getAuthHeaders(),
+                }
+              );
+
+              if (availableMenusRes.ok) {
+                const availableMenus =
+                  (await availableMenusRes.json()) as any[];
+                console.warn(`No menu found with slug "${params.menu_slug}"`);
+                if (availableMenus.length > 0) {
+                  const availableSlugs = availableMenus
+                    .map((menu) => menu.slug)
+                    .join(", ");
+                  console.warn(`Available menu slugs: ${availableSlugs}`);
+                }
+              }
+            }
+          } catch (error) {
+            console.warn("Menu by slug method failed:", error);
+          }
+        }
+
+        // Method 2: Try to get menu from theme customizer settings
+        if (params?.location) {
+          try {
+            const customizerUrl = `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/settings`;
+            const response = await fetch(customizerUrl, {
+              headers: this.getAuthHeaders(),
+            });
+
+            if (response.ok) {
+              const settings = await response.json();
+              // Check for menu locations in customizer settings
+              if (
+                settings.nav_menu_locations &&
+                settings.nav_menu_locations[params.location]
+              ) {
+                const menuId = settings.nav_menu_locations[params.location];
+                console.log(
+                  `Found menu ID ${menuId} for location ${params.location}`
+                );
+
+                // Get menu items by menu id
+                const menuItemsRes = await fetch(
+                  `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/menu-items?menus=${menuId}&acf_format=standard`,
+                  {
+                    headers: this.getAuthHeaders(),
+                  }
+                );
+
+                if (menuItemsRes.ok) {
+                  const menuItems = (await menuItemsRes.json()) as WPMenuItem[];
+                  return menuItems;
+                }
+              }
+            }
+          } catch (error) {
+            console.warn("Customizer settings check failed:", error);
+          }
+        }
+
+        // Method 3: Try direct menu ID
+        if (params?.menu_id) {
+          try {
+            const menuItemsRes = await fetch(
+              `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/menu-items?menus=${params.menu_id}&acf_format=standard`,
+              {
+                headers: this.getAuthHeaders(),
+              }
+            );
+
+            if (menuItemsRes.ok) {
+              const menuItems = (await menuItemsRes.json()) as WPMenuItem[];
+              return menuItems;
+            }
+          } catch (error) {
+            console.warn("Direct menu ID method failed:", error);
+          }
+        }
+
+        // Method 4: Fallback to pages as menu items (common for simple sites)
+        try {
+          const pages = await this.getPages({ per_page: 20 });
+          return pages.map((page) => ({
+            id: page.id,
+            title: { rendered: page.title.rendered },
+            url: page.link,
+            target: "_self",
+            classes: [],
+            link_class: [],
+            xfn: [],
+            description: page.excerpt.rendered,
+            attr_title: page.title.rendered,
+            object: "page",
+            object_id: page.id,
+            parent: page.parent,
+            menu_order: page.menu_order,
+            type: "post_type",
+            type_label: "Page",
+            _links: page._links,
+          }));
+        } catch (error) {
+          console.warn("Pages fallback failed:", error);
+        }
+
+        console.warn("No menu items found with any method");
+        return [];
+      } catch (error) {
+        console.error("Error fetching menu items:", error);
+        return [];
+      }
+    }
+  );
+
+  // Get all available menus
+  getMenus = cache(async (): Promise<WPMenu[]> => {
+    try {
+      const menus = await wpFetch(WP_ENDPOINTS.menus);
+      return Array.isArray(menus) ? menus : [];
+    } catch (error) {
+      console.error("Error fetching menus:", error);
+      return [];
+    }
+  });
+
+  // Get site logo
+  getSiteLogo = cache(
+    async (): Promise<{
+      url: string;
+      width?: number;
+      height?: number;
+      alt?: string;
+    } | null> => {
+      try {
+        // Try to get logo from customizer settings
+        const customizerUrl = `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/settings`;
+
+        // Prepare headers
+        const headers: Record<string, string> = {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        };
+
+        // Add authentication header if credentials are provided
+        if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.applicationPassword) {
+          const credentials = Buffer.from(
+            `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.applicationPassword}`
+          ).toString("base64");
+          headers.Authorization = `Basic ${credentials}`;
+        } else if (WORDPRESS_CONFIG.username && WORDPRESS_CONFIG.password) {
+          const credentials = Buffer.from(
+            `${WORDPRESS_CONFIG.username}:${WORDPRESS_CONFIG.password}`
+          ).toString("base64");
+          headers.Authorization = `Basic ${credentials}`;
+        }
+
+        const response = await fetch(customizerUrl, { headers });
+
+        if (response.ok) {
+          const settings = await response.json();
+
+          // Check for logo in various possible locations
+          if (settings.custom_logo) {
+            // Get logo media details
+            const logoMedia = await this.getMedia(settings.custom_logo);
+            return {
+              url: logoMedia.source_url,
+              width: logoMedia.media_details.width,
+              height: logoMedia.media_details.height,
+              alt: logoMedia.alt_text || "Site Logo",
+            };
+          }
+        }
+
+        // Fallback: try to get logo from site options
+        try {
+          const optionsUrl = `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/settings`;
+          const optionsResponse = await fetch(optionsUrl, { headers });
+
+          if (optionsResponse.ok) {
+            const options = await optionsResponse.json();
+
+            // Check for logo in site options
+            if (options.site_logo) {
+              const logoMedia = await this.getMedia(options.site_logo);
+              return {
+                url: logoMedia.source_url,
+                width: logoMedia.media_details.width,
+                height: logoMedia.media_details.height,
+                alt: logoMedia.alt_text || "Site Logo",
+              };
+            }
+          }
+        } catch (optionsError) {
+          console.warn("Could not fetch site options:", optionsError);
+        }
+
+        // Try to get logo from theme mods (some themes store it here)
+        try {
+          const themeModsUrl = `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/settings`;
+          const themeModsResponse = await fetch(themeModsUrl, { headers });
+
+          if (themeModsResponse.ok) {
+            const themeMods = await themeModsResponse.json();
+
+            if (themeMods.custom_logo) {
+              const logoMedia = await this.getMedia(themeMods.custom_logo);
+              return {
+                url: logoMedia.source_url,
+                width: logoMedia.media_details.width,
+                height: logoMedia.media_details.height,
+                alt: logoMedia.alt_text || "Site Logo",
+              };
+            }
+          }
+        } catch (themeModsError) {
+          console.warn("Could not fetch theme mods:", themeModsError);
+        }
+
+        return null;
+      } catch (error) {
+        console.error("Error fetching site logo:", error);
+        return null;
       }
     }
   );

@@ -152,7 +152,6 @@ export default function PostContent({
 }: PostContentProps) {
   const isClient = useClientSide();
   const imageUrl = getImageUrl(featuredImageUrl || "");
-  console.log("post", post);
 
   return (
     <article className="max-w-4xl mx-auto">
