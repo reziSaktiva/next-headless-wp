@@ -382,47 +382,27 @@ export class WordPressAPI {
       totalPages: number;
     }> => {
       try {
-        const posts = await wpFetch(WP_ENDPOINTS.posts, params);
-
-        // Get total count by making a request to get total posts
-        let totalPosts = 0;
-        try {
-          // Make a request with per_page=1 to get total count efficiently
-          const url = new URL(WP_ENDPOINTS.posts, WORDPRESS_CONFIG.siteUrl);
-          url.searchParams.set("per_page", "1");
-
-          const response = await fetch(url.toString(), {
-            method: "GET",
-            headers: {
-              Accept: "application/json",
-              "Content-Type": "application/json",
-            },
-            mode: "cors",
-          });
-
-          if (response.ok) {
-            const totalPostsHeader = response.headers.get("x-wp-total");
-            if (totalPostsHeader) {
-              totalPosts = parseInt(totalPostsHeader);
-              console.log("Total posts from header:", totalPosts);
-            } else {
-              // Fallback: get all posts to count
-              const allPosts = await wpFetch(WP_ENDPOINTS.posts, {
-                per_page: 100,
-              });
-              totalPosts = allPosts.length;
-            }
+        // Get total posts and pages from headers
+        const response = await fetch(
+          `${
+            WORDPRESS_CONFIG.siteUrl
+          }/wp-json/wp/v2/posts?${new URLSearchParams(
+            params as Record<string, string>
+          )}`,
+          {
+            headers: this.getAuthHeaders(),
           }
-        } catch (error) {
-          console.warn("Could not get total posts count:", error);
-          // Fallback: estimate based on current page and posts per page
-          totalPosts =
-            posts.length > 0
-              ? (params?.page || 1) * (params?.per_page || 10)
-              : 0;
-        }
+        );
 
-        const totalPages = Math.ceil(totalPosts / (params?.per_page || 10));
+        const posts = (await response.json()) as WPPost[];
+        const totalPosts = parseInt(
+          response.headers.get("x-wp-total") || "0",
+          10
+        );
+        const totalPages = parseInt(
+          response.headers.get("x-wp-totalpages") || "0",
+          10
+        );
 
         return { posts, totalPosts, totalPages };
       } catch (error) {
@@ -603,6 +583,7 @@ export class WordPressAPI {
       show_on_front: string;
       page_on_front?: number;
       page_for_posts?: number;
+      posts_per_page?: number;
       title: string;
       description: string;
     }> => {
@@ -626,9 +607,12 @@ export class WordPressAPI {
           headers.Authorization = `Basic ${credentials}`;
         }
 
-        const res = await fetch(`${WORDPRESS_CONFIG.siteUrl}/wp-json`, {
-          headers,
-        });
+        const res = await fetch(
+          `${WORDPRESS_CONFIG.siteUrl}/wp-json/wp/v2/settings?embed=true`,
+          {
+            headers,
+          }
+        );
         const data = await res.json();
         // Some WP setups put these in data.site, some in data directly
         const site = data.site || data;
@@ -636,6 +620,7 @@ export class WordPressAPI {
           show_on_front: site.show_on_front || "posts",
           page_on_front: site.page_on_front,
           page_for_posts: site.page_for_posts,
+          posts_per_page: site.posts_per_page,
           title: site.name || "WordPress Site",
           description: site.description || "A WordPress powered site",
         };
@@ -672,9 +657,6 @@ export class WordPressAPI {
 
             if (menus && menus.length > 0) {
               const menu = menus[0];
-              console.log(
-                `Found menu with ID ${menu.id} for slug ${params.menu_slug}`
-              );
 
               // Get menu items by menu id
               const menuItemsRes = await fetch(
@@ -730,9 +712,6 @@ export class WordPressAPI {
                 settings.nav_menu_locations[params.location]
               ) {
                 const menuId = settings.nav_menu_locations[params.location];
-                console.log(
-                  `Found menu ID ${menuId} for location ${params.location}`
-                );
 
                 // Get menu items by menu id
                 const menuItemsRes = await fetch(

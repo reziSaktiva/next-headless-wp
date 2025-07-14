@@ -11,14 +11,6 @@ export default async function PostsPage({
   try {
     const params = searchParams;
     const currentPage = params?.page ? parseInt(params.page as string) : 1;
-    const perPage = 6;
-
-    const { posts, totalPosts, totalPages } = await wp.getPosts({
-      per_page: perPage,
-      page: currentPage,
-      orderby: "date",
-      order: "desc",
-    });
 
     // Get WordPress settings for title (with fallback)
     let settings;
@@ -31,6 +23,15 @@ export default async function PostsPage({
         description: "A WordPress powered site",
       };
     }
+
+    const perPage = settings?.posts_per_page || 10;
+    console.log("perPage", perPage);
+    const { posts, totalPosts, totalPages } = await wp.getPosts({
+      per_page: perPage,
+      page: currentPage,
+      orderby: "date",
+      order: "desc",
+    });
 
     return (
       <div className="min-h-screen bg-gray-50">

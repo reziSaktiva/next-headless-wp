@@ -124,6 +124,7 @@ export default async function DynamicPageRoute({
 }: RouteProps) {
   try {
     const settings = await getWordPressSettings();
+    console.log("settings", settings);
 
     // Handle homepage (empty route)
     if (!route || route.length === 0) {

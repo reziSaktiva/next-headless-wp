@@ -2,7 +2,6 @@ import { wp } from "@/lib/wordpress";
 import Image from "next/image";
 import Link from "next/link";
 import Edges from "./edges";
-import { DesktopMenu } from "./menus/desktop-menu";
 
 export default async function Navbar() {
   const menuItems = await wp.getMenuItems();
