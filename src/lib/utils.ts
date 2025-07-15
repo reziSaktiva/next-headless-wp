@@ -58,9 +58,9 @@ export function isValidUrl(string: string): boolean {
 export function getImageUrl(
   imageUrl: string,
   fallbackUrl: string = "/placeholder.jpg"
-): string {
+): string | undefined {
   if (!imageUrl || !isValidUrl(imageUrl)) {
-    return fallbackUrl;
+    return undefined;
   }
   return imageUrl;
 }

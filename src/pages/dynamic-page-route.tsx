@@ -2,6 +2,8 @@ import { wp } from "@/lib/wordpress";
 import PostContent from "@/pages/post-content";
 import PostsPage from "./posts";
 import NotFound from "@/app/not-found";
+import PreviewBanner from "@/components/PreviewBanner";
+import PreviewError from "@/components/PreviewError";
 
 // Types
 interface RouteProps {
@@ -35,15 +37,22 @@ const getWordPressSettings = async (): Promise<WordPressSettings> => {
   }
 };
 
-const renderPostContent = (post: any, featuredImageUrl: string) => (
+const renderPostContent = (
+  post: any,
+  featuredImageUrl: string | undefined,
+  isPreview: boolean = false
+) => (
   <div className="min-h-screen bg-gray-50">
+    {isPreview && <PreviewBanner />}
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
       <PostContent post={post} featuredImageUrl={featuredImageUrl} />
     </div>
   </div>
 );
 
-const getFeaturedImageUrl = async (mediaId: number): Promise<string> => {
+const getFeaturedImageUrl = async (
+  mediaId: number
+): Promise<string | undefined> => {
   try {
     return await wp.getFeaturedImageUrl(mediaId);
   } catch (error) {
@@ -58,12 +67,14 @@ const handleHomepage = async (
   route: string[],
   searchParams?: { [key: string]: string | string[] | undefined }
 ) => {
+  const isPreview = searchParams?.preview === "true";
+
   // Static page as homepage
   if (settings.show_on_front === "page" && settings.page_on_front) {
     try {
-      const page = await wp.getPageById(settings.page_on_front);
+      const page = await wp.getPageById(settings.page_on_front, isPreview);
       const featuredImageUrl = await getFeaturedImageUrl(page.featured_media);
-      return renderPostContent(page, featuredImageUrl);
+      return renderPostContent(page, featuredImageUrl, isPreview);
     } catch (error) {
       console.error("Error fetching front page:", error);
       return <NotFound />;
@@ -85,34 +96,52 @@ const handlePage = async (
   route: string[],
   searchParams?: { [key: string]: string | string[] | undefined }
 ) => {
+  const isPreview = searchParams?.preview === "true";
+
   try {
+    // First, try to get the page
+    const page = await wp.getPageBySlug(slug, isPreview);
+
+    // If there's a second segment in the route, it might be a post slug
     if (route[1]) {
-      return handlePost(route[1]);
+      // Check if this page is the posts page
+      if (settings.page_for_posts && settings.page_for_posts === page.id) {
+        // Try to get the post
+        try {
+          const post = await wp.getPostBySlug(route[1], isPreview);
+          const featuredImageUrl = await getFeaturedImageUrl(
+            post.featured_media
+          );
+          return renderPostContent(post, featuredImageUrl, isPreview);
+        } catch (postError) {
+          return <NotFound />;
+        }
+      } else {
+        return <NotFound />;
+      }
     }
 
-    const page = await wp.getPageBySlug(slug);
-
-    // Check if this is the posts page
+    // If no second segment, check if this is the posts page
     if (settings.page_for_posts && settings.page_for_posts === page.id) {
+      // This is the posts page, render posts archive
       return <PostsPage searchParams={searchParams} />;
     }
 
+    // If not posts page, render the page
     const featuredImageUrl = await getFeaturedImageUrl(page.featured_media);
-    return renderPostContent(page, featuredImageUrl);
+    return renderPostContent(page, featuredImageUrl, isPreview);
   } catch (error) {
-    console.log("Page not found, trying post...");
     return null;
   }
 };
 
 // Post handling
-const handlePost = async (slug: string) => {
+const handlePost = async (slug: string, isPreview: boolean = false) => {
   try {
-    const post = await wp.getPostBySlug(slug);
+    const post = await wp.getPostBySlug(slug, isPreview);
     const featuredImageUrl = await getFeaturedImageUrl(post.featured_media);
-    return renderPostContent(post, featuredImageUrl);
+    return renderPostContent(post, featuredImageUrl, isPreview);
   } catch (error) {
-    console.log("Post not found...");
     return null;
   }
 };
@@ -124,7 +153,46 @@ export default async function DynamicPageRoute({
 }: RouteProps) {
   try {
     const settings = await getWordPressSettings();
-    console.log("settings", settings);
+
+    const isPreview = searchParams?.preview === "true";
+    const previewId = searchParams?.p;
+
+    // Handle preview with ID
+    if (isPreview && previewId) {
+      // Check if authentication is configured
+      if (!process.env.WORDPRESS_USERNAME || !process.env.WORDPRESS_PASSWORD) {
+        return (
+          <PreviewError error="Preview requires authentication. Please configure WORDPRESS_USERNAME and WORDPRESS_PASSWORD in .env.local" />
+        );
+      }
+
+      const postId = parseInt(previewId as string);
+      if (!isNaN(postId)) {
+        try {
+          // Try to get as post first
+          const post = await wp.getPostById(postId, true);
+          const featuredImageUrl = await getFeaturedImageUrl(
+            post.featured_media
+          );
+          return renderPostContent(post, featuredImageUrl, true);
+        } catch (error) {
+          try {
+            // Try to get as page
+            const page = await wp.getPageById(postId, true);
+            const featuredImageUrl = await getFeaturedImageUrl(
+              page.featured_media
+            );
+            return renderPostContent(page, featuredImageUrl, true);
+          } catch (pageError) {
+            return (
+              <PreviewError error="Post or page not found" postId={postId} />
+            );
+          }
+        }
+      } else {
+        return <PreviewError error="Invalid preview ID format" />;
+      }
+    }
 
     // Handle homepage (empty route)
     if (!route || route.length === 0) {
@@ -137,10 +205,20 @@ export default async function DynamicPageRoute({
     const pageResult = await handlePage(slug, settings, route, searchParams);
     if (pageResult) return pageResult;
 
+    // If page not found and no second segment, try as post
+    if (!route[1]) {
+      try {
+        const post = await wp.getPostBySlug(slug, isPreview);
+        const featuredImageUrl = await getFeaturedImageUrl(post.featured_media);
+        return renderPostContent(post, featuredImageUrl, isPreview);
+      } catch (postError) {
+        // Post not found, continue to 404
+      }
+    }
+
     // If not found, return 404
     return <NotFound />;
   } catch (error) {
-    console.error("Error in dynamic routing:", error);
     return <NotFound />;
   }
 }

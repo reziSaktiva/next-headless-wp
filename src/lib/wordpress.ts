@@ -413,15 +413,43 @@ export class WordPressAPI {
   );
 
   // Get single post by slug
-  getPostBySlug = cache(async (slug: string): Promise<WPPost> => {
-    try {
-      const posts = await wpFetch(WP_ENDPOINTS.posts, { slug });
-      return posts[0];
-    } catch (error) {
-      console.error("Error fetching post:", error);
-      throw error;
+  getPostBySlug = cache(
+    async (slug: string, isPreview: boolean = false): Promise<WPPost> => {
+      try {
+        const params: Record<string, any> = { slug };
+
+        // Add preview parameters if needed
+        if (isPreview) {
+          params.status = "draft,pending,publish";
+        }
+
+        const posts = await wpFetch(WP_ENDPOINTS.posts, params);
+        return posts[0];
+      } catch (error) {
+        console.error("Error fetching post:", error);
+        throw error;
+      }
     }
-  });
+  );
+
+  // Get post by ID for preview (includes drafts and pending posts)
+  getPostById = cache(
+    async (postId: number, isPreview: boolean = false): Promise<WPPost> => {
+      try {
+        const params: Record<string, any> = {};
+
+        // Add preview parameters if needed
+        if (isPreview) {
+          params.status = "draft,pending,publish";
+        }
+
+        return await wpFetch(`${WP_ENDPOINTS.posts}/${postId}`, params);
+      } catch (error) {
+        console.error("Error fetching post by ID:", error);
+        throw error;
+      }
+    }
+  );
 
   // Get all pages
   getPages = cache(
@@ -442,15 +470,43 @@ export class WordPressAPI {
   );
 
   // Get single page by slug
-  getPageBySlug = cache(async (slug: string): Promise<WPPage> => {
-    try {
-      const pages = await wpFetch(WP_ENDPOINTS.pages, { slug });
-      return pages[0];
-    } catch (error) {
-      console.error("Error fetching page:", error);
-      throw error;
+  getPageBySlug = cache(
+    async (slug: string, isPreview: boolean = false): Promise<WPPage> => {
+      try {
+        const params: Record<string, any> = { slug };
+
+        // Add preview parameters if needed
+        if (isPreview) {
+          params.status = "draft,pending,publish";
+        }
+
+        const pages = await wpFetch(WP_ENDPOINTS.pages, params);
+        return pages[0];
+      } catch (error) {
+        console.error("Error fetching page:", error);
+        throw error;
+      }
     }
-  });
+  );
+
+  // Get page by ID for preview (includes drafts and pending pages)
+  getPageById = cache(
+    async (pageId: number, isPreview: boolean = false): Promise<WPPage> => {
+      try {
+        const params: Record<string, any> = {};
+
+        // Add preview parameters if needed
+        if (isPreview) {
+          params.status = "draft,pending,publish";
+        }
+
+        return await wpFetch(`${WP_ENDPOINTS.pages}/${pageId}`, params);
+      } catch (error) {
+        console.error("Error fetching page by ID:", error);
+        throw error;
+      }
+    }
+  );
 
   // Get categories
   getCategories = cache(
@@ -470,8 +526,11 @@ export class WordPressAPI {
   );
 
   // Get media by ID
-  getMedia = cache(async (mediaId: number): Promise<WPMedia> => {
+  getMedia = cache(async (mediaId: number): Promise<WPMedia | undefined> => {
     try {
+      if (!mediaId) {
+        return undefined;
+      }
       return await wpFetch(`${WP_ENDPOINTS.media}/${mediaId}`);
     } catch (error) {
       console.error("Error fetching media:", error);
@@ -484,13 +543,14 @@ export class WordPressAPI {
     async (
       featuredMediaId: number,
       size: string = "medium"
-    ): Promise<string> => {
+    ): Promise<string | undefined> => {
       try {
         const media = await this.getMedia(featuredMediaId);
-        return media.media_details.sizes[size]?.source_url || media.source_url;
+        return (
+          media?.media_details.sizes[size]?.source_url || media?.source_url
+        );
       } catch (error) {
-        console.error("Error fetching featured image:", error);
-        return "";
+        return undefined;
       }
     }
   );
@@ -538,16 +598,6 @@ export class WordPressAPI {
       }
     }
   );
-
-  // Get page by ID
-  getPageById = cache(async (pageId: number): Promise<WPPage> => {
-    try {
-      return await wpFetch(`${WP_ENDPOINTS.pages}/${pageId}`);
-    } catch (error) {
-      console.error("Error fetching page by ID:", error);
-      throw error;
-    }
-  });
 
   // Get site info from posts endpoint (fallback when settings not accessible)
   getSiteInfo = cache(
@@ -837,10 +887,10 @@ export class WordPressAPI {
             // Get logo media details
             const logoMedia = await this.getMedia(settings.custom_logo);
             return {
-              url: logoMedia.source_url,
-              width: logoMedia.media_details.width,
-              height: logoMedia.media_details.height,
-              alt: logoMedia.alt_text || "Site Logo",
+              url: logoMedia?.source_url || "",
+              width: logoMedia?.media_details.width,
+              height: logoMedia?.media_details.height,
+              alt: logoMedia?.alt_text || "Site Logo",
             };
           }
         }
@@ -857,10 +907,10 @@ export class WordPressAPI {
             if (options.site_logo) {
               const logoMedia = await this.getMedia(options.site_logo);
               return {
-                url: logoMedia.source_url,
-                width: logoMedia.media_details.width,
-                height: logoMedia.media_details.height,
-                alt: logoMedia.alt_text || "Site Logo",
+                url: logoMedia?.source_url || "",
+                width: logoMedia?.media_details.width,
+                height: logoMedia?.media_details.height,
+                alt: logoMedia?.alt_text || "Site Logo",
               };
             }
           }
@@ -879,10 +929,10 @@ export class WordPressAPI {
             if (themeMods.custom_logo) {
               const logoMedia = await this.getMedia(themeMods.custom_logo);
               return {
-                url: logoMedia.source_url,
-                width: logoMedia.media_details.width,
-                height: logoMedia.media_details.height,
-                alt: logoMedia.alt_text || "Site Logo",
+                url: logoMedia?.source_url || "",
+                width: logoMedia?.media_details.width,
+                height: logoMedia?.media_details.height,
+                alt: logoMedia?.alt_text || "Site Logo",
               };
             }
           }
